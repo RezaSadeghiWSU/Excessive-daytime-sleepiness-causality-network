@@ -1,0 +1,210 @@
+---
+title: "bnlearn"
+author: "Ricky Farina, Lydia Bullock"
+date: "`r Sys.Date()`"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+## Note to self: don't forget to set a seed at the beginning of code in case you have to rerun a graph
+
+```{r}
+library(bnlearn)
+library(Rgraphviz)
+library(tidyverse)
+```
+
+```{r data and preprocessing}
+sleep_2 <- read.csv("/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Renamed_Model_2_Set_1_Data.csv")
+sleep_5 <- read.csv("/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Renamed_Model_2_Set_2_Data.csv")
+sleep_2$X <- NULL; sleep_5$X <- NULL
+
+Labels <- colnames(sleep_2)
+
+# Turn categorical data types into factors 
+for (col in colnames(sleep_2)) {
+  sleep_2[[col]] = as.factor(sleep_2[[col]])
+}
+
+for (col in colnames(sleep_5)) {
+  sleep_5[[col]] = as.factor(sleep_5[[col]])
+}
+```
+
+```{r blacklist}
+
+# Blacklist for renamed columns
+sources = c("Age", "Sex", "Race")
+targets = setdiff(Labels, sources)
+auto_bl = tiers2blacklist(list(sources, targets))
+manual_bl = matrix(c(
+  "Hypertension", "Hypercholesterolemia",
+  "Asthma", "COPD",
+  "Cataplexy", "SPF Score",
+  "Fatigue", "Eating Impact on Alertness/Wakefulness",
+  "ESS Score", "Insomnia",
+  "FOSQ Summary Score", "ESS Score",
+  "SPF Score", "Cataplexy"
+), ncol = 2, byrow = TRUE, dimnames = list(NULL, c("from", "to")))
+Blacklist = rbind(auto_bl, manual_bl)
+
+```
+
+```{r whitelist}
+
+# Whitelist for renamed columns
+Whitelist = matrix(c(
+  "People in House", "Sleep Duration",
+  "Sex", "Self-perception of Weight",
+  "BMI", "Type 2 Diabetes",
+  "BMI", "Self-perception of Weight",
+  "BMI", "Apnea Score",
+  "BMI", "Hypertension",
+  "Apnea Score", "Nose Total Score",
+  "Narcolepsy", "HHF Score",
+  "Narcolepsy", "Fatigue",
+  "Narcolepsy", "Cataplexy",
+  "Narcolepsy", "Sleep Attacks",
+  "Insomnia", "Fatigue",
+  "Hypertension", "Other Cardiovascular Problems",
+  "Hypertension", "Urologic/Kidney Problem",
+  "Other Cardiovascular Problems", "CHF",
+  "Asthma", "Other Pulmonary Problems",
+  "Allergies/Sinus Problems", "Asthma",
+  "Allergies/Sinus Problems", "Ear/Nose/Throat Problem/Surgery",
+  "Allergies/Sinus Problems", "Endocrine/Metabolic Problem",
+  "Tonsillectomy/Adenoidectomy", "Medical Problem/Surgery",
+  "Tonsillectomy/Adenoidectomy", "Asthma",
+  "Ear/Nose/Throat Problem/Surgery", "Tonsillectomy/Adenoidectomy",
+  "Endocrine/Metabolic Problem", "Ear/Nose/Throat Problem/Surgery",
+  "Endocrine/Metabolic Problem", "Medical Problem/Surgery",
+  "Smoker", "Street/Recreational Drug Use",
+  "Exercise", "BMI",
+  "Smoker", "Hypertension",
+  "Smoker", "Other Pulmonary Problems",
+  "Sleep Duration", "Fatigue",
+  "Apnea Score", "ESS Score",
+  "Insomnia", "ESS Score",
+  "Narcolepsy", "ESS Score"),
+  ncol = 2, byrow = TRUE, dimnames = list(NULL, c("from", "to")))
+
+```
+
+## Function to Compare "Observed" and "Intervention" Probability Distributions
+```{r}
+check_evidence = function(boot_object, target_node, evidence_node, evidence_node_level, data_bn) {
+  if (data_bn == "5") {
+    data_bn <- sleep_5
+  } else if (data_bn == "2") {
+    data_bn <- sleep_2
+  }
+  
+  # Parameter learning
+  fitted_bn <- bn.fit(averaged.network(boot_object), 
+                      data = data_bn, method = "bayes", iss = 1)
+  
+  # Structures node and level in the form list("evidence_node" = "evidence_node_level")
+  evidence_list <- setNames(list(evidence_node_level), evidence_node)
+  
+  # Fixes the evidence_node to the specified level and produces a new bn
+  mut_bn <- mutilated(fitted_bn, evidence = evidence_list)
+  
+  # Creates conditional probability distributions from original and mutilated networks
+  print("Observed:")
+  print(prop.table(table(cpdist(fitted_bn, nodes = target_node, 
+                                evidence = TRUE, n = 10000))))
+  print("Intervention")
+  print(prop.table(table(cpdist(mut_bn, nodes = target_node, 
+                          evidence = TRUE, n = 10000))))
+}
+```
+
+
+## Implementing the above functions:
+## 2 Categories
+
+```{r}
+set.seed(15)
+boot.hc2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "hc",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              restart = 10, 
+                                              perturb = 5))
+
+check_evidence(boot.tb5, "ess_0900", "index_3", "Never", 5)
+
+```
+
+```{r}
+set.seed(30)
+boot.tb2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "tabu",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              tabu = 25))
+
+
+```
+
+```{r}
+set.seed(45)
+boot.mmhc2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "mmhc",
+                        algorithm.args = list(
+                          whitelist = Whitelist,
+                          blacklist = Blacklist,
+                          restrict.args = list(test = "mi", 
+                                               alpha = 0.05),
+                          maximize.args = list(score = "bic", 
+                                               restart = 10, 
+                                               perturb = 5)))
+
+
+```
+
+
+##5 categories
+```{r}
+set.seed(53)
+boot.hc5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "hc",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              restart = 10, 
+                                              perturb = 5))
+
+
+```
+
+```{r}
+set.seed(106)
+boot.tb5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "tabu",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              tabu = 25))
+
+
+```
+
+```{r}
+set.seed(159)
+boot.mmhc5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "mmhc",
+                        algorithm.args = list(
+                          whitelist = Whitelist,
+                          blacklist = Blacklist,
+                          restrict.args = list(test = "mi", 
+                                               alpha = 0.05),
+                          maximize.args = list(score = "bic", 
+                                               restart = 10, 
+                                               perturb = 5)))
+
+
+```
+

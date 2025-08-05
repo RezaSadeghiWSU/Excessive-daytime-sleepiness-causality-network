@@ -1,0 +1,454 @@
+---
+title: "bnlearn"
+author: "Lydia Bullock, Ricky Farina"
+date: "`r Sys.Date()`"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+## Note to self: don't forget to set a seed at the beginning of code in case you have to rerun a graph
+
+```{r}
+library(graph)
+library(Rgraphviz)
+library(bnlearn)
+library(tidyverse)
+```
+
+## Data and preprocessing
+```{r data and preprocessing}
+
+# Load data set - note that the name of the data set is specific to each person
+sleep_2 <- read.csv("/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Renamed_Xs_Model_2_Set_1_Data.csv", check.names = FALSE) 
+sleep_5 <- read.csv("/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Renamed_Xs_Model_2_Set_2_Data.csv", check.names = FALSE) 
+
+sleep_2$X <- NULL; sleep_5$X <- NULL
+
+Labels <- colnames(sleep_5)
+
+# Turn categorical data types into factors
+for (col in colnames(sleep_2)) {
+  sleep_2[[col]] = as.factor(sleep_2[[col]])
+}
+for (col in colnames(sleep_5)) {
+  sleep_5[[col]] = as.factor(sleep_5[[col]])
+}
+
+```
+
+## Create Blacklist
+```{r blacklist}
+
+# Blacklist for renamed columns with Xs - provides more space for graphing
+sources = c("Age xxxxx", "Sex xxxxx", "Race xxxxx")
+targets = setdiff(Labels, sources)
+auto_bl = tiers2blacklist(list(sources, targets))
+manual_bl = matrix(c(
+  "Hypertension xxxxxxxxxx", "Hypercholesterolemia xxxxx",
+  "Asthma xxxxx", "COPD xxxxx",
+  "SPF Score xxxxx", "Cataplexy xxxxx",
+  "Cataplexy xxxxx", "SPF Score xxxxx",
+  "Fatigue xxxxx", "Eating Impact on Alertness/Wakefulness xxxxx",
+  "ESS Score xxxxx", "Insomnia xxxxx",
+  "FOSQ Summary Score xxxxx", "ESS Score xxxxx",
+  "Insomnia xxxxx", "Narcolepsy xxxxx"
+), ncol = 2, byrow = TRUE, dimnames = list(NULL, c("from", "to")))
+Blacklist = rbind(auto_bl, manual_bl)
+
+```
+
+
+## Create Whitelist
+```{r whitelist}
+
+# Whitelist for renamed columns with Xs - provides more space for graphing
+Whitelist = matrix(c(
+  "Sex xxxxx", "Self-perception of Weight xxxxx",
+  "Hypertension xxxxxxxxxx", "Other Cardiovascular Problems xxxxx",
+  "Hypertension xxxxxxxxxx", "Urologic/Kidney Problem xxxxx",
+  "Other Cardiovascular Problems xxxxx", "CHF xxxxx",
+  "Allergies/Sinus Problems xxxxx", "Asthma xxxxx",
+  "Allergies/Sinus Problems xxxxx", "Ear/Nose/Throat Problem/Surgery xxxxx",
+  "Allergies/Sinus Problems xxxxx", "Gastrointestinal Problem/Surgery xxxxx",
+  "Gastrointestinal Problem/Surgery xxxxx", "Ear/Nose/Throat Problem/Surgery xxxxx",
+  "Tonsillectomy/Adenoidectomy xxxxx", "Medical Problem/Surgery xxxxx",
+  "Ear/Nose/Throat Problem/Surgery xxxxx", "Tonsillectomy/Adenoidectomy xxxxx",
+  "Gastrointestinal Problem/Surgery xxxxx", "Medical Problem/Surgery xxxxx", 
+  "Smoker xxxxx", "Street/Recreational Drug Use xxxxx",
+  "Smoker xxxxx", "COPD xxxxx",
+  "Exercise xxxxx", "BMI xxxxx",
+  "Tonsillectomy/Adenoidectomy xxxxx", "Asthma xxxxx",
+  "Apnea Score xxxxx", "ESS Score xxxxx",
+  "Insomnia xxxxx", "ESS Score xxxxx",
+  "Narcolepsy xxxxx", "ESS Score xxxxx",
+  "Street/Recreational Drug Use xxxxx", "Neurologic Problem xxxxx",
+  "Street/Recreational Drug Use xxxxx", "Psychiatric/Mental Health Problem xxxxx", 
+  "Narcolepsy xxxxx", "SPF Score xxxxx",
+  "Neurologic Problem xxxxx", "Sleep Seizures xxxxx",
+  "BMI xxxxx", "Type 2 Diabetes xxxxx",
+  "BMI xxxxx", "Self-perception of Weight xxxxx",
+  "BMI xxxxx", "Apnea Score xxxxx",
+  "BMI xxxxx", "Hypertension xxxxxxxxxx",
+  "People in House xxxxx", "Sleep Duration xxxxx",
+  "Smoker xxxxx", "Hypertension xxxxxxxxxx",
+  "Smoker xxxxx", "Other Pulmonary Problems xxxxx",
+  "Sleep Duration xxxxx", "Fatigue xxxxx",
+  "Narcolepsy xxxxx", "HHF Score xxxxx",
+  "Narcolepsy xxxxx", "Fatigue xxxxx",
+  "Narcolepsy xxxxx", "Cataplexy xxxxx",
+  "Narcolepsy xxxxx", "Sleep Attacks xxxxx",
+  "Insomnia xxxxx", "Fatigue xxxxx",
+  "Asthma xxxxx", "Other Pulmonary Problems xxxxx"
+  ),
+  ncol = 2, byrow = TRUE, dimnames = list(NULL, c("from", "to")))
+
+```
+
+
+## Function to get all ancestors of a node
+```{r}
+# consensus_dag = final DAG from averaged.network function, node = name of target node (string)
+get_ancestors <- function(consensus_dag, node) {
+  # Initialize the ancestor vector and the queue vector 
+  ancestor_nodes <- character(0)
+  queue <- node
+  
+  # As long as there are nodes in the queue (nodes whose parents we need to check), continue working
+  while (length(queue) > 0) {
+    
+    # Go to first node in queue
+    current_node <- queue[1]
+    
+    # Remove first node in queue
+    queue <- queue[-1]
+    
+    # Use bnlearn's parents() function to get direct parents of the current node
+    node_parents <- parents(consensus_dag, current_node)
+    
+    # Iterate through the parents, adding them to ancestor_nodes and to the queue
+    for (parent in node_parents) {
+      if (!parent %in% ancestor_nodes) {
+        ancestor_nodes <- c(ancestor_nodes, parent)
+        queue <- c(queue, parent)
+      }
+    }
+  }
+  
+  return(ancestor_nodes)
+}
+
+```
+
+
+## Function for getting edges that form between nodes that are in the ancestor list
+```{r}
+# boot_object = bootstrapped item from boot.strength function, name = name of the file (must end in .png, this is a string)
+get_ancestor_edges <- function(boot_object, filename) {
+  
+  # Get all edges
+  all_edges = arcs(averaged.network(boot_object))
+  
+  # Get ancestor nodes
+  ancestor_nodes = get_ancestors(averaged.network((boot_object)), "ESS Score xxxxx")
+  
+  # Get the ancestor edges
+  ancestor_edges = all_edges[all_edges[,"from"] %in% ancestor_nodes &
+                               all_edges[,"to"] %in% ancestor_nodes |
+                               all_edges[, "to"] == "ESS Score xxxxx", ]
+  
+  ancestor_edges <- as.data.frame(ancestor_edges)
+  
+  ancestor_edges$from <- gsub("x+$", "", ancestor_edges$from)
+  ancestor_edges$to <- gsub("x+$", "", ancestor_edges$to)
+  
+  write.csv(ancestor_edges, filename, row.names = FALSE)
+}
+```
+
+
+## Function to Make Consensus DAG
+```{r make consensus dag}
+# boot = bootstrapped item from boot.strength function, name = what to name the file (must end in .png, this is a string)
+make_consensus_dag <- function(boot, name, save_graph = FALSE) {
+
+  # Get the consensus DAG
+  consensus_dag <- averaged.network(boot)
+  
+  # Make the graph
+  if (save_graph) {
+    png(name, width = 3200, height = 2400, res = 300)
+  }
+  
+  gR <- graphviz.plot(consensus_dag,
+                render = FALSE,
+                layout = "dot",
+                shape = "rectangle",
+                fontsize = 15,
+                highlight = list(nodes = "ESS Score xxxxx", col = "black", fill = "lightblue")
+                )
+  
+  # Edit Nodes:
+  node.attrs = nodeRenderInfo(gR)
+  
+  # Force override all node attributes to increase height of ellipse
+  for(i in 1:length(nodes(consensus_dag))) {
+    node_name <- nodes(consensus_dag)[i]
+    node.attrs$height[node_name] <- 60
+  }
+  
+  # Fill in all ancestors of ESS Score using function I made
+  all_ancestors <- get_ancestors(consensus_dag, "ESS Score xxxxx")
+  for (ancestor in all_ancestors) {
+    node.attrs$fill[ancestor] <- "lightgrey"
+    }
+  
+  # Rename the nodes manually for better visualization
+  all_nodes <- nodes(consensus_dag)
+  node_labels <- setNames(all_nodes, all_nodes)
+  
+  # Relabel the columns to remove x's
+  node_labels["Age xxxxx"] <- "Age"
+  node_labels["Sex xxxxx"] <- "Sex"
+  node_labels["BMI xxxxx"] <- "BMI"
+  node_labels["Race xxxxx"] <- "Race"
+  node_labels["Hypertension xxxxxxxxxx"] <- "Hypertension"
+  node_labels["CHF xxxxx"] <- "CHF"
+  node_labels["Other Cardiovascular Problems xxxxx"] <- "Cardiovascular \nProblems"
+  node_labels["Asthma xxxxx"] <- "Asthma"
+  node_labels["COPD xxxxx"] <- "COPD"
+  node_labels["Other Pulmonary Problems xxxxx"] <- "Pulmonary \nProblems"
+  node_labels["Allergies/Sinus Problems xxxxx"] <- "Allergies/Sinus\nProblems"
+  node_labels["Tonsillectomy/Adenoidectomy xxxxx"] <- "Tonsillectomy/\nAdenoidectomy"
+  node_labels["Nasal/Jaw/Apnea Surgery xxxxx"] <- "Nasal/Jaw/Apnea\nSurgery"
+  node_labels["Ear/Nose/Throat Problem/Surgery xxxxx"] <- "Ear/Nose/Throat\nProblem/Surgery"
+  node_labels["Dental Problems xxxxx"] <- "Dental \nProblems"
+  node_labels["Gastrointestinal Problem/Surgery xxxxx"] <- "Gastrointestinal\nProblem/Surgery"
+  node_labels["Neurologic Problem xxxxx"] <- "Neurologic \nProblem"
+  node_labels["Hypercholesterolemia xxxxx"] <- "Hyper-\ncholesterolemia"
+  node_labels["Type 2 Diabetes xxxxx"] <- "Type 2 \nDiabetes"
+  node_labels["Endocrine/Metabolic Problem xxxxx"] <- "Endocrine/Metabolic\nProblem"
+  node_labels["Urologic/Kidney Problem xxxxx"] <- "Urologic/Kidney\nProblem"
+  node_labels["Psychiatric/Mental Health Problem xxxxx"] <- "Psychiatric/Mental\nHealth Problem"
+  node_labels["Medical Problem/Surgery xxxxx"] <- "Medical\nProblem/Surgery"
+  node_labels["Genetic Testing xxxxx"] <- "Genetic \nTesting"
+  node_labels["Nose Total Score xxxxx"] <- "Nose Score"
+  node_labels["People in House xxxxx"] <- "People in \nHouse"
+  node_labels["Sleep Duration xxxxx"] <- "Sleep \nDuration"
+  node_labels["Exercise xxxxx"] <- "Exercise"
+  node_labels["Alcohol Consumption xxxxx"] <- "Alcohol\nConsumption"
+  node_labels["Coffee Consumption xxxxx"] <- "Coffee\nConsumption"
+  node_labels["Street/Recreational Drug Use xxxxx"] <- "Street/Recreational\nDrug Use"
+  node_labels["Cataplexy xxxxx"] <- "Cataplexy"
+  node_labels["Apnea Score xxxxx"] <- "Apnea \nScore"
+  node_labels["Narcolepsy xxxxx"] <- "Narcolepsy"
+  node_labels["ESS Score xxxxx"] <- "ESS \nScore"
+  node_labels["Difficulty Staying Awake xxxxx"] <- "Difficulty\nStaying Awake"
+  node_labels["Sleep Attacks xxxxx"] <- "Sleep \nAttacks"
+  node_labels["Insomnia xxxxx"] <- "Insomnia"
+  node_labels["rMEQ Total Score xxxxx"] <- "rMEQ Score"
+  node_labels["SPF Score xxxxx"] <- "Sleep \nParalysis"
+  node_labels["HHF Score xxxxx"] <- "HHF \nScore"
+  node_labels["Sleep Seizures xxxxx"] <- "Nocturnal \nSeizures"
+  node_labels["FOSQ Summary Score xxxxx"] <- "FOSQ Score"
+  node_labels["Depression xxxxx"] <- "Depression"
+  node_labels["GADQ Total Score xxxxx"] <- "Anxiety"
+  node_labels["Fatigue xxxxx"] <- "Fatigue"
+  node_labels["Eating Impact on Alertness/Wakefulness xxxxx"] <- "Eating Impact on\nAlertness/Wakefulness"
+  node_labels["Sleep less soundly if dinner skipped xxxxx"] <- "Sleep less soundly\nif dinner skipped"
+  node_labels["Self-perception of Weight xxxxx"] <- "Self-perception\nof Weight"
+  node_labels["RLS Current Probability xxxxx"] <- "RLS \nProbability"
+  node_labels["Smoker xxxxx"] <- "Smoker"
+  node_labels["Ethnicity xxxxx"] <- "Ethnicity"
+  
+  node.attrs$label <- node_labels
+  
+  nodeRenderInfo(gR) = node.attrs
+  
+  # Edit edges:
+  arc.attrs = edgeRenderInfo(gR)
+  
+  whitelist_edges = paste(Whitelist[,"from"], Whitelist[,"to"], sep = "~")
+  
+  arc.attrs$col[whitelist_edges] = "#38DF1A"
+  
+  edgeRenderInfo(gR) = arc.attrs
+  
+  # Render Graph
+  renderGraph(gR)
+  
+  # Add a legend
+  legend("bottomright",
+       legend = c("ESS Score", "Ancestors of ESS Score", "Whitelist Edges", "Graph Generated Edges"),
+       col = c("black", "black", "#38DF1A", "black"),  # Point outline and line colors
+       lwd = c(NA, NA, 2, 1),                             # Line widths
+       pch = c(22, 22, NA, NA),                           # Use filled circles with outline
+       pt.bg = c("lightblue", "lightgrey", NA, NA),       # Point background colors
+       pt.cex = 1.8,                                      # Point size
+       cex = 1,                                         # Font size
+       bty = "n")
+  
+  if (save_graph) {
+    dev.off()
+    cat("Graph saved to:", normalizePath(name), "\n")
+  }
+
+  return (consensus_dag)
+  
+}
+
+```
+
+
+## Function for getting list of edges that appear in consensus dag but not the whitelisted edges
+```{r}
+# boot_object = bootstrapped item from boot.strength function, wl = whitelist matrix, file_name = name of file (must end in .png, this is a string)
+get_new_edges = function(boot_object, wl, file_name) {
+  
+  # Compile edges that aren't already in the whitelist
+  novel_edges = anti_join(as.data.frame(arcs(averaged.network(boot_object))), 
+                          as.data.frame(wl), 
+                          by = c("from", "to"))
+  
+  # Remove trailing x's from both columns
+  novel_edges$from <- gsub("x+$", "", novel_edges$from)
+  novel_edges$to <- gsub("x+$", "", novel_edges$to)
+  
+  write.csv(novel_edges, file_name, row.names = FALSE)
+}
+```
+
+
+## Function for visually comparing the differences in two graphs
+```{r}
+# dag1, dag2 = bn objects, filepath = path to save file
+compare_two_graphs <- function(dag1, dag2, filepath){
+
+  filename <- "Graph Comparison.png"
+  png(filepath, width = 10, height = 6, units = "in", res = 300)
+  
+  graph.par(list(
+    nodes = list(fontsize = 50, width = 1.5, height = 0.6)
+))
+
+  par(mfrow = c(1, 2))
+  graph <- graphviz.compare(dag1, dag2, shape = "rectangle", layout = "fdp",
+                   main = c("Tabu", "Hill-Climb"),
+                   sub = paste("SHD =", c("0", shd(dag1, dag2))),
+                   diff.args = list(fp.lwd = 1.5, fn.lwd = 1.5, tp.col = "black", fp.col= 'red', fn.col = "blue"))
+
+  dev.off()
+  cat("Graph saved to:", normalizePath(filename), "\n")
+  
+}
+```
+
+
+## Implementing the above functions:
+## 2 Categories
+```{r}
+set.seed(15)
+boot.hc2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "hc",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              restart = 10, 
+                                              perturb = 5))
+
+consensus.hc2 <- make_consensus_dag(boot.hc2, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Hill-Climb - Model 2 Set 1/Model2_hc_2cat.png", save_graph = TRUE)
+get_new_edges(consensus.hc2, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Hill-Climb - Model 2 Set 1/Edges_Model2_hc_2cat.csv", save_csv = TRUE)
+
+```
+
+```{r}
+set.seed(30)
+boot.tb2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "tabu",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              tabu = 25))
+
+consensus.tb2 <- make_consensus_dag(boot.tb2, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Tabu - Model 2 Set 1/Model2_tb_2cat.png", save_graph = TRUE)
+get_new_edges(consensus.tb2, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Tabu - Model 2 Set 1/Edges_Model2_tb_2cat.csv", save_csv = TRUE)
+
+```
+
+```{r}
+set.seed(45)
+boot.mmhc2 = boot.strength(sleep_2, R = 250,
+                        algorithm = "mmhc",
+                        algorithm.args = list(
+                          whitelist = Whitelist,
+                          blacklist = Blacklist,
+                          restrict.args = list(test = "mi", 
+                                               alpha = 0.05),
+                          maximize.args = list(score = "bic", 
+                                               restart = 10, 
+                                               perturb = 5)))
+
+consensus.mmhc2 <- make_consensus_dag(boot.mmhc2, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Max-Min Hill-Climb - Model 2 Set 1/Model2_mmhc_2cat.png", save_graph = TRUE)
+get_new_edges(consensus.mmhc2, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 1/Max-Min Hill-Climb - Model 2 Set 1/Edges_Model2_mmhc_2cat.csv", save_csv = TRUE)
+
+```
+
+
+## 5 Categories
+```{r}
+set.seed(53)
+boot.hc5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "hc",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic", 
+                                              restart = 10, 
+                                              perturb = 5))
+
+consensus.hc5 <- make_consensus_dag(boot.hc5, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Hill-Climb - Model 2 Set 2/Model2_hc_5cat.png", save_graph = TRUE)
+get_new_edges(boot.hc5, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Hill-Climb - Model 2 Set 2/Edges_Model2_hc_5cat.csv")
+```
+
+
+## This is our choice for the final graph
+```{r}
+set.seed(106)
+boot.tb5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "tabu",
+                        algorithm.args = list(whitelist = Whitelist,
+                                              blacklist = Blacklist,
+                                              score = "bic",
+                                              tabu = 25))
+
+consensus.tb5 <- make_consensus_dag(boot.tb5, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Tabu - Model 2 Set 2/Model2_tb_5cat.png", save_graph = TRUE)
+get_new_edges(boot.tb5, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Tabu - Model 2 Set 2/Edges_Model2_tb_5cat.csv")
+get_ancestor_edges(boot.tb5, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Tabu - Model 2 Set 2/Ancestor_Edges_Model2_tb_5cat.csv")
+```
+
+
+```{r}
+set.seed(159)
+boot.mmhc5 = boot.strength(sleep_5, R = 250,
+                        algorithm = "mmhc",
+                        algorithm.args = list(
+                          whitelist = Whitelist,
+                          blacklist = Blacklist,
+                          restrict.args = list(test = "mi", 
+                                               alpha = 0.05),
+                          maximize.args = list(score = "bic", 
+                                               restart = 10, 
+                                               perturb = 5)))
+
+consensus.mmhc5 <- make_consensus_dag(boot.mmhc5, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Max-Min Hill-Climb - Model 2 Set 2/Model2_mmhc_5cat.png", save_graph = TRUE)
+get_new_edges(boot.mmhc5, Whitelist, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Set 2/Max-Min Hill-Climb - Model 2 Set 2/Edges_Model2_mmhc_5cat.csv")
+```
+
+## Compare Two Graphs
+```{r}
+consensus_tb5 = averaged.network(boot.tb5)
+consensus_mmhc5 = averaged.network(boot.mmhc5)
+compare_two_graphs(consensus_tb5, consensus_mmhc5, "/Users/Student/Desktop/GitHub/SMART-REU-2025-ESS/Lydia/Model 2/Comparison_Graph with MMHC.png")
+```
+
+
+
+

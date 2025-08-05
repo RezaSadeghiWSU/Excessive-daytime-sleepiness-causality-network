@@ -1,0 +1,38 @@
+Whitelist
+From,To
+Sex,Self-perception of Weight
+Hypertension,Other Cardiovascular Problems
+Hypertension,Urologic/Kidney Problem
+Other Cardiovascular Problems,CHF
+Allergies/Sinus Problems,Asthma
+Allergies/Sinus Problems,Ear/Nose/Throat Problem/Surgery
+Allergies/Sinus Problems,Gastrointestinal Problem/Surgery
+Gastrointestinal Problem/Surgery,Ear/Nose/Throat Problem/Surgery
+Tonsillectomy/Adenoidectomy,Medical Problem/Surgery
+Ear/Nose/Throat Problem/Surgery,Tonsillectomy/Adenoidectomy
+Gastrointestinal Problem/Surgery,Medical Problem/Surgery
+Smoker,Street/Recreational Drug Use
+Smoker,COPD
+Exercise,BMI
+Tonsillectomy/Adenoidectomy,Asthma
+Apnea Score,ESS Score
+Insomnia,ESS Score
+Narcolepsy,ESS Score
+Street/Recreational Drug Use,Neurologic Problem
+Street/Recreational Drug Use,Psychiatric/Mental Health Problem
+Narcolepsy,SPF Score
+Neurologic Problem,Sleep Seizures
+BMI,Type 2 Diabetes
+BMI,Self-perception of Weight
+BMI,Apnea Score
+BMI,Hypertension
+People in House,Sleep Duration
+Smoker,Hypertension
+Smoker,Other Pulmonary Problems
+Sleep Duration,Fatigue
+Narcolepsy,HHF Score
+Narcolepsy,Fatigue
+Narcolepsy,Cataplexy
+Narcolepsy,Sleep Attacks
+Insomnia,Fatigue
+Asthma,Other Pulmonary Problems

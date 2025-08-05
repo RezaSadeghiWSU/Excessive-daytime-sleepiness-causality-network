@@ -1,0 +1,12 @@
+From,To
+Hypertension,Hypercholesterolemia
+Asthma,COPD
+SPF Score,Cataplexy
+Cataplexy,SPF Score
+Fatigue,Eating Impact on Alertness/Wakefulness
+ESS Score,Insomnia
+FOSQ Summary Score,ESS Score
+Insomnia,Narcolepsy
+Everything…,Age
+Everything…,Sex
+Everything…,Race
